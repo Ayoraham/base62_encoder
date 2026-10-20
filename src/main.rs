@@ -1,54 +1,115 @@
-use std::collections::HashMap;
-
 use crate::DecodeError::{InvalidChar, Overflow};
+use clap::{Parser};
+use std::num::ParseIntError;
+use std::{collections::HashMap, process};
 
-enum DecodeError{
-    InvalidChar(char, usize), 
-    Overflow
+const ALPHABET: &str = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+enum DecodeError {
+    InvalidChar(char, usize),
+    Overflow,
 }
 
-fn encode(input: u128) -> String{
-    let alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let mut conv_table = HashMap::new();
+enum ParseError {
+    InvalidOperation(String),
+    InvalidNumber(ParseIntError),
+}
 
-    for val in alphabet.char_indices(){
-        conv_table.insert(val.0 as u128, val.1);
+enum Operation {
+    Encode(u128),
+    Decode(String),
+}
+
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Operation you want to perform (Either Encode or Decode)
+    #[arg(short, long)]
+    operation: String,
+
+    /// Value you want to convert
+    #[arg(short, long)]
+    value: String,
+}
+
+impl Args {
+    fn init(&self) -> Result<Operation, ParseError> {
+        let op_low = self.operation.to_lowercase();
+        match op_low.as_str() {
+            "encode" => {
+                let val = self
+                    .value
+                    .parse::<u128>()
+                    .map_err(ParseError::InvalidNumber)?;
+                Ok(Operation::Encode(val))
+            }
+            "decode" => Ok(Operation::Decode(self.value.clone())),
+            _ => Err(ParseError::InvalidOperation(op_low)),
+        }
     }
+}
 
+fn encode(input: u128) -> String {
     let mut input = input;
     let mut encoding = String::new();
-    loop{
-    let dividend  = input/62;
-    let remainder = input %62;
-    encoding.push(*conv_table.get(&remainder).unwrap());
-    println!("{input}/62 = {dividend}r{remainder}");
-    input /= 62;
-    if dividend == 0{break}
-}
+    loop {
+        let dividend = input / 62;
+        let remainder = input % 62;
+        encoding.push(ALPHABET.as_bytes()[remainder as usize] as char);
+        input /= 62;
+        if dividend == 0 {
+            break;
+        }
+    }
     encoding.chars().rev().collect::<String>()
 }
 
-fn decode(input: &str) -> Result<u128, DecodeError>{
-    let alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+fn decode(input: String) -> Result<u128, DecodeError> {
     let mut conv_table = HashMap::new();
 
-    for val in alphabet.char_indices(){
+    for val in ALPHABET.char_indices() {
         conv_table.insert(val.1, val.0 as u128);
-    };
+    }
     let mut decoded = 0_u128;
-    for char in input.char_indices(){
-        let lookup = *conv_table.get(&char.1).ok_or(DecodeError::InvalidChar(char.1, char.0))?;
-        decoded = decoded.checked_mul(62).and_then(|n| n.checked_add(lookup)).ok_or(DecodeError::Overflow)?;}
+    for char in input.char_indices() {
+        let lookup = *conv_table
+            .get(&char.1)
+            .ok_or(DecodeError::InvalidChar(char.1, char.0))?;
+        decoded = decoded
+            .checked_mul(62)
+            .and_then(|n| n.checked_add(lookup))
+            .ok_or(DecodeError::Overflow)?;
+    }
 
     Ok(decoded)
 }
 
 fn main() {
-    println!("{}", encode(u128::MAX));
-    match decode("1geh263eq32"){
-        Ok(num) => println!("{num}"),
-        Err(InvalidChar(val, pos)) => println!("Invalid character {} at position {}", val, pos),
-        Err(Overflow) => println!("Input too large")
-    }
-
+    let args = Args::parse();
+    match args.init() {
+        Ok(val) => {
+            match val {
+                Operation::Encode(no) => println!("{}", encode(no)),
+                Operation::Decode(value) => match decode(value){
+                    Ok(no) => println!("{no}"),
+                    Err(err) => match err {
+                        InvalidChar(val, pos) => {eprintln!("Invalid character {} at position {}", val, pos);process::exit(1)},
+                        Overflow => {eprintln!("Input too large");
+                                        process::exit(1)}
+                    }
+                }
+            }
+        }
+        Err(error_type) => match error_type {
+            ParseError::InvalidOperation(operation) => {
+                eprintln!("Operation '{operation}' not recognized\nEnter either Encode or Decode!");
+                process::exit(1)
+            }
+            ParseError::InvalidNumber(kind) => {
+                eprintln!("There was an error: {}", kind);
+                process::exit(1)
+            }
+        },
+    };
+    
 }
